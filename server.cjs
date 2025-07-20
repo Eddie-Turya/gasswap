@@ -1,33 +1,47 @@
-// server.js
 const express = require("express");
 const cors = require("cors");
-const fetch = require("node-fetch");
 const bodyParser = require("body-parser");
+const fetch = require("node-fetch");
 
 const app = express();
-app.use(cors());
+
+// ✅ Fix CORS to allow frontend
+app.use(cors({
+  origin: "*", // Replace with "https://beemxchain.io" to lock to your domain
+}));
+
 app.use(bodyParser.json());
 
-const FEE_WALLET = "4EkpmcAnw2F9fMj8U6ySofZNmWyAkGkRhp3MMc7ZLLsL";
+// === CONFIG ===
+const FEE_WALLET = "DyFn3wGNQuRoc28WtUKrKgTCkbMsEj1Ww4aZ1RTWWcWY";
 const JUPITER_API_URL = "https://quote-api.jup.ag/v6";
 
+// === SWAP ENDPOINT ===
 app.post("/getSwapTx", async (req, res) => {
   try {
     const { inputMint, outputMint, amount, userPublicKey } = req.body;
 
-    // Add fee account
+    if (!inputMint || !outputMint || !amount || !userPublicKey) {
+      return res.status(400).json({ error: "Missing required parameters" });
+    }
+
     const platformFeeBps = 3; // 0.03%
     const feeAccount = FEE_WALLET;
 
-    // Fetch Jupiter route
+    // ✅ Get best quote
     const quoteResp = await fetch(
       `${JUPITER_API_URL}/quote?inputMint=${inputMint}&outputMint=${outputMint}&amount=${amount}&slippageBps=50&platformFeeBps=${platformFeeBps}`
     );
     const quote = await quoteResp.json();
 
+    if (!quote.data || quote.data.length === 0) {
+      console.error("❌ No quote data found", quote);
+      return res.status(400).json({ error: "No quote data found." });
+    }
+
     const bestRoute = quote.data[0];
 
-    // Build swap transaction
+    // ✅ Build swap transaction
     const swapTxResp = await fetch(`${JUPITER_API_URL}/swap`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -40,13 +54,21 @@ app.post("/getSwapTx", async (req, res) => {
     });
 
     const swapTx = await swapTxResp.json();
+
+    if (!swapTx.swapTransaction) {
+      console.error("❌ Swap transaction build failed:", swapTx);
+      return res.status(500).json({ error: "Failed to build swap transaction", swapTx });
+    }
+
+    // ✅ Return the transaction
     res.json(swapTx);
   } catch (error) {
-    console.error("Swap Error:", error);
-    res.status(500).json({ error: "Failed to create swap transaction." });
+    console.error("❌ Server Error:", error);
+    res.status(500).json({ error: "Internal server error", message: error.message });
   }
 });
 
+// === START SERVER ===
 app.listen(3000, () => {
-  console.log("✅ Backend running on http://localhost:3000");
+  console.log("🚀 GASSWAP backend running on http://localhost:3000");
 });
